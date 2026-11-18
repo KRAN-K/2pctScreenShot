@@ -937,6 +937,12 @@ public class CaptureService extends Service {
 
     // -------------------------------------------------------------- LINE / notifications
 
+    private void shareAny(Uri u) {
+        Intent i = new Intent(this, ShareActivity.class).setData(u)
+                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_GRANT_READ_URI_PERMISSION);
+        try { startActivity(i); } catch (Exception ignored) { }
+    }
+
     private void shareToLine(Uri u) {
         Intent i = new Intent(Intent.ACTION_SEND);
         i.setType("image/*");
@@ -946,9 +952,7 @@ public class CaptureService extends Service {
         try {
             startActivity(i);
         } catch (ActivityNotFoundException e) {
-            Intent chooser = Intent.createChooser(new Intent(i).setPackage(null), "Share screenshot");
-            chooser.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
-            try { startActivity(chooser); } catch (Exception ignored) { }
+            shareAny(u);
         }
     }
 
@@ -1072,6 +1076,7 @@ public class CaptureService extends Service {
         TextView folder = pill("Open folder", true);
         TextView line = pill("LINE", true);
         TextView close = pill("Close", false);
+        TextView shareBtn = pill("Share…", true);
         LinearLayout row1 = new LinearLayout(this);
         LinearLayout row2 = new LinearLayout(this);
         row1.setOrientation(LinearLayout.HORIZONTAL);
@@ -1079,6 +1084,7 @@ public class CaptureService extends Service {
         row1.addView(open, btnLp());
         row1.addView(folder, btnLp());
         row2.addView(line, btnLp());
+        row2.addView(shareBtn, btnLp());
         row2.addView(close, btnLp());
         box.addView(row1);
         box.addView(row2);
@@ -1100,6 +1106,7 @@ public class CaptureService extends Service {
         });
         folder.setOnClickListener(v -> { dismissPreview(); ImageSaver.openFolder(this); });
         line.setOnClickListener(v -> { dismissPreview(); shareToLine(uri); });
+        shareBtn.setOnClickListener(v -> { dismissPreview(); shareAny(uri); });
         close.setOnClickListener(v -> dismissPreview());
         x.setOnClickListener(v -> dismissPreview());
         off.setOnClickListener(v -> {

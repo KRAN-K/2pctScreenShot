@@ -122,7 +122,7 @@ public class MainActivity extends Activity {
         section("Theme");
         Button theme = button("Theme: " + AppTheme.NAMES[Math.min(Prefs.i(this, Prefs.THEME, 2),
                 AppTheme.NAMES.length - 1)], false);
-        theme.setOnClickListener(v -> new AlertDialog.Builder(this)
+        theme.setOnClickListener(v -> new AlertDialog.Builder(this, AlertDialog.THEME_DEVICE_DEFAULT_DARK)
                 .setTitle("Choose theme")
                 .setItems(AppTheme.NAMES, (d, which) -> {
                     Prefs.putI(this, Prefs.THEME, which);
@@ -132,7 +132,7 @@ public class MainActivity extends Activity {
 
         Button fc = button("Scroll area color: " + AppTheme.FRAME_NAMES[Math.min(Prefs.i(this, Prefs.FRAME_COLOR, 0),
                 AppTheme.FRAME_NAMES.length - 1)], false);
-        fc.setOnClickListener(v -> new AlertDialog.Builder(this)
+        fc.setOnClickListener(v -> new AlertDialog.Builder(this, AlertDialog.THEME_DEVICE_DEFAULT_DARK)
                 .setTitle("Scroll area color")
                 .setItems(AppTheme.FRAME_NAMES, (d, which) -> {
                     Prefs.putI(this, Prefs.FRAME_COLOR, which);

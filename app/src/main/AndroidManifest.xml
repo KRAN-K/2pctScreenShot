@@ -30,6 +30,12 @@
 
         <activity android:name=".AboutActivity" />
 
+        <activity
+            android:name=".ShareActivity"
+            android:exported="false"
+            android:excludeFromRecents="true"
+            android:theme="@android:style/Theme.Translucent.NoTitleBar" />
+
         <service
             android:name=".CaptureService"
             android:exported="false"
