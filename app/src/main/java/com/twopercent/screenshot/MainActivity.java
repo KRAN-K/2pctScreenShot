@@ -96,7 +96,7 @@ public class MainActivity extends Activity {
         section("Capture");
         addNumber("Delay before capture (seconds)", Prefs.DELAY, 0);
         addSwitch("Horizontal scroll (sideways lists)", Prefs.HORIZONTAL, false);
-        addNumber("Seconds between timed shots (1-20, lower = more overlap)", Prefs.TIMER_SEC, 2);
+        addNumber("Seconds between timed shots (3-20; more time = slower, safer scrolling)", Prefs.TIMER_SEC, 5);
         addNumber("Max screens per long shot", Prefs.MAX_FRAMES, 20);
         root.addView(text("Scroll shot: the scroll area is set on screen with the \u25B2 \u25BC handles "
                 + "when you start a scroll shot.", 12, AppTheme.sub(this), false));

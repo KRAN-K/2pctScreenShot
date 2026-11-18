@@ -31,6 +31,21 @@ final class Stitcher {
         this.contentBottom = h - Math.max(0, Math.min(cropBottom, h / 3));
     }
 
+    /** True when two frames are practically identical (screen has stopped moving). */
+    static boolean same(Bitmap a, Bitmap b) {
+        if (a == null || b == null || a.getWidth() != b.getWidth() || a.getHeight() != b.getHeight()) return false;
+        int w = a.getWidth(), h = a.getHeight();
+        long sum = 0, n = 0;
+        for (int y = 0; y < h; y += 12) {
+            for (int x = 0; x < w; x += 12) {
+                int p = a.getPixel(x, y), q = b.getPixel(x, y);
+                sum += Math.abs(((p >> 16) & 255) - ((q >> 16) & 255)) + Math.abs(((p >> 8) & 255) - ((q >> 8) & 255)) + Math.abs((p & 255) - (q & 255));
+                n++;
+            }
+        }
+        return n == 0 || (double) sum / n < 2.0;
+    }
+
     int strips() { return strips.size(); }
 
     void addFirst(Bitmap f) {
@@ -52,7 +67,7 @@ final class Stitcher {
 
         int span = contentBottom - cropTop;
         // Try several bands. Bands near the top cope with big scrolls, lower ones with small scrolls.
-        double[] fracs = {0.04, 0.12, 0.25, 0.40};
+        double[] fracs = {0.03, 0.08, 0.15, 0.25, 0.35, 0.50};
         int bestD = -1;
         double bestAvg = Double.MAX_VALUE;
         int cols = nl[0].length;
@@ -85,10 +100,11 @@ final class Stitcher {
         lastScore = bestAvg == Double.MAX_VALUE ? 99 : bestAvg;
 
         boolean ok = false;
-        if (bestD > 0 && bestAvg <= MAX_AVG_DIFF) {
-            // verify: most of the overlapping area must really match (animated bits may differ)
+        if (bestD > 0 && bestAvg <= MAX_AVG_DIFF * 2) {
+            // verify: most of the overlapping area must really match (animated bits may differ).
+            // Clean matches need 50%; a looser match (slight blur / moving bits) needs a better score.
             lastFrac = matchFraction(nl, prevL, cropTop, contentBottom - bestD, bestD);
-            ok = lastFrac >= 0.5;
+            ok = (bestAvg <= MAX_AVG_DIFF && lastFrac >= 0.4) || lastFrac >= 0.6;
         }
 
         int d;

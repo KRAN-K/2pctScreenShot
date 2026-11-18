@@ -687,6 +687,17 @@ public class CaptureService extends Service {
         Bitmap f = grabWait();
         if (f == null) { sleep(500); f = grabWait(); }
         if (f == null) { setOverlayVisible(true); return -1; }
+        // wait until the screen has stopped moving (scroll momentum / animations) before using the frame
+        long settleEnd = SystemClock.uptimeMillis() + 2500;
+        while (SystemClock.uptimeMillis() < settleEnd) {
+            sleep(180);
+            Bitmap g = grabNew();
+            if (g == null) break;            // nothing new arrived: screen is still
+            last = g;
+            boolean still = Stitcher.same(f, g);
+            f = g;
+            if (still) break;
+        }
         if (horizontal) f = rotate(f, 90);      // sideways scrolling becomes up/down scrolling
         int r;
         if (section == null) {
@@ -750,7 +761,7 @@ public class CaptureService extends Service {
         cancelled = false;
         pauseOnly = false;
         main.post(() -> { if (timerBtn != null) timerBtn.setText("⏸  Stop timer"); });
-        final int secs = Math.max(1, Math.min(20, Prefs.i(this, Prefs.TIMER_SEC, 2)));
+        final int secs = Math.max(3, Math.min(20, Prefs.i(this, Prefs.TIMER_SEC, 5)));
         worker.execute(() -> {
             try {
                 while (!stopAuto) {
@@ -776,7 +787,7 @@ public class CaptureService extends Service {
                     } else if (r == Stitcher.NO_CHANGE) {
                         setStatus("Nothing moved, still waiting...");
                     } else if (r == Stitcher.FAIL) {
-                        setStatus("Missed a match (" + section.lastScore() + "). Scroll less between shots.");
+                        setStatus("Missed a match (" + section.lastScore() + "). Scroll back up a little so the last screen is partly visible; next shot in a moment.");
                     }
                 }
                 setOverlayVisible(true);
