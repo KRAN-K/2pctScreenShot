@@ -66,16 +66,19 @@ final class Stitcher {
     /** Match quality of the last attempt (lower score is better), for on-screen hints. */
     int lastScore() { return (int) Math.round(lastScore); }
 
-    /** @param nominal fallback scroll distance in px if matching fails (<=0: just report FAIL) */
+    /** Smallest scroll (px) that is worth adding; smaller moves wait until the page has moved a bit more. */
+    private static final int MIN_D = 6;
+
+    /** @param nominal unused (kept for callers); a frame that cannot be matched cleanly is reported as FAIL and skipped */
     int addNext(Bitmap f, int nominal) {
         byte[][] nl = luma(f);
         if (meanDiff(nl, prevL, cropTop, contentBottom) < 1.0) return NO_CHANGE;
 
         int span = contentBottom - cropTop;
-        // Try several bands. Bands near the top cope with big scrolls, lower ones with small scrolls.
-        double[] fracs = {0.03, 0.08, 0.15, 0.25, 0.35, 0.50};
-        int bestD = -1;
-        double bestAvg = Double.MAX_VALUE;
+        double[] fracs = {0.03, 0.10, 0.20, 0.32, 0.45, 0.60};
+        int[] ds = new int[fracs.length];
+        double[] avgs = new double[fracs.length];
+        int n = 0;
         int cols = nl[0].length;
         int rows = (BAND_H + 1) / 2;
         for (double fr : fracs) {
@@ -99,34 +102,63 @@ final class Stitcher {
                 if (complete) { bestCost = cost; d0 = d; }
             }
             if (d0 > 0) {
-                double avg = (double) bestCost / (rows * cols);
-                if (avg < bestAvg) { bestAvg = avg; bestD = d0; }
+                ds[n] = d0;
+                avgs[n] = (double) bestCost / (rows * cols);
+                n++;
             }
         }
+        if (n == 0) { lastScore = 99; return FAIL; }
+
+        // the bands vote: the shift most bands agree on wins (ties: best match)
+        int cand = ds[0], bestVotes = 0;
+        double bestA = Double.MAX_VALUE;
+        for (int i = 0; i < n; i++) {
+            int votes = 0;
+            for (int j = 0; j < n; j++) if (Math.abs(ds[j] - ds[i]) <= 1) votes++;
+            if (votes > bestVotes || (votes == bestVotes && avgs[i] < bestA)) {
+                bestVotes = votes;
+                bestA = avgs[i];
+                cand = ds[i];
+            }
+        }
+
+        // refine to the exact pixel using the whole overlapping area, not just one band
+        int bestD = -1;
+        double bestAvg = Double.MAX_VALUE, bestFrac = 0;
+        for (int d = cand - 2; d <= cand + 2; d++) {
+            if (d < 1 || contentBottom - d - cropTop < BAND_H) continue;
+            double[] st = overlap(nl, prevL, cropTop, contentBottom - d, d);
+            if (st[0] < bestAvg) { bestAvg = st[0]; bestFrac = st[1]; bestD = d; }
+        }
         lastScore = bestAvg == Double.MAX_VALUE ? 99 : bestAvg;
+        lastFrac = bestFrac;
+        if (bestD < 1) return FAIL;
 
-        boolean ok = false;
-        if (bestD > 0 && bestAvg <= MAX_AVG_DIFF * 2.5) {
-            // verify: most of the overlapping area must really match (animated bits may differ).
-            // Clean matches need 50%; a looser match (slight blur / moving bits) needs a better score.
-            lastFrac = matchFraction(nl, prevL, cropTop, contentBottom - bestD, bestD);
-            ok = (bestAvg <= MAX_AVG_DIFF && lastFrac >= 0.4) || lastFrac >= 0.6
-                    || (bestAvg <= MAX_AVG_DIFF * 2.5 && lastFrac >= 0.3);   // small mismatches are fine
-        }
+        // strict: the overlap has to really look the same, otherwise skip this frame (the next one will do)
+        boolean ok = bestFrac >= 0.80 && bestAvg <= 14.0 && (bestVotes >= 2 || bestFrac >= 0.92);
+        if (!ok) return FAIL;
+        if (bestD < MIN_D) return NO_CHANGE;       // barely moved: keep the old reference frame
 
-        int d;
-        if (ok) {
-            d = bestD;
-        } else if (nominal > 0) {
-            d = Math.min(nominal, span);
-        } else {
-            return FAIL;
-        }
-
-        strips.add(Bitmap.createBitmap(f, 0, contentBottom - d, w, d));
+        strips.add(Bitmap.createBitmap(f, 0, contentBottom - bestD, w, bestD));
         prev = f;
         prevL = nl;
         return OK;
+    }
+
+    /** {average luma difference, fraction of pixels within tolerance} of new[y] vs prev[y + d], y in [from, to). */
+    private static double[] overlap(byte[][] nw, byte[][] pv, int from, int to, int d) {
+        long sum = 0, good = 0, n = 0;
+        for (int y = from; y < to; y += 2) {
+            byte[] ra = nw[y], rb = pv[y + d];
+            for (int c = 0; c < ra.length; c += 2) {
+                int diff = Math.abs((ra[c] & 255) - (rb[c] & 255));
+                sum += diff;
+                if (diff <= 18) good++;
+                n++;
+            }
+        }
+        if (n == 0) return new double[]{Double.MAX_VALUE, 0};
+        return new double[]{(double) sum / n, (double) good / n};
     }
 
     /** Joins everything into one bitmap. Footer (cropBottom area) of the last frame is appended. */

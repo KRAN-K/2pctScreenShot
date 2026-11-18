@@ -282,7 +282,7 @@ public class CaptureService extends Service {
         revBtn = pill(revLabel(), false);
         TextView fin = pill("✓  Done / Finish", true);
         TextView cancel = pill("Cancel", false);
-        arrange(bodySection, cap, timerBtn, dirBtn, revBtn, fin, cancel);
+        arrange(bodySection, cap, timerBtn, revBtn, fin, cancel);
         overlay.addView(bodySection);
 
         statusTv = new TextView(this);
@@ -364,7 +364,7 @@ public class CaptureService extends Service {
         return r ? "Auto swipe: \u25BC down" : "Auto swipe: \u25B2 up";
     }
 
-    private boolean horizontalMode() { return Prefs.b(this, Prefs.HORIZONTAL, false); }
+    private boolean horizontalMode() { return false; }   // long shots always stitch up/down
 
     private TextView pill(String label, boolean filled) {
         TextView t = new TextView(this);
@@ -528,17 +528,16 @@ public class CaptureService extends Service {
             float[] xs, ys;
             if (horizontal) {
                 float x = recRev ? (recLine + recMargin + fw) / 2f : (recLine - recMargin) / 2f;
-                xs = new float[]{x, x};
-                ys = new float[]{fh * 0.45f, fh * 0.70f};
+                xs = new float[]{x};
+                ys = new float[]{fh * 0.5f};
             } else {
                 float y = recRev ? (recLine + recMargin + fh) / 2f : (recLine - recMargin) / 2f;
-                float off = dp(65) + dp(34);
-                xs = new float[]{fw / 2f - off, fw / 2f + off};
-                ys = new float[]{y, y};
+                xs = new float[]{fw / 2f};
+                ys = new float[]{y};
             }
             // content moves up (vertical) or left (sideways) while the user swipes the same way
             float fwd = horizontal ? (recRev ? 90 : -90) : (recRev ? 180 : 0);
-            for (int i = 0; i < 2; i++) {
+            for (int i = 0; i < xs.length; i++) {
                 if (recColor == REC_RED) thumb(c, xs[i], ys[i]);
                 else if (recColor == REC_AMBER) arrow(c, xs[i], ys[i], fwd + 180, REC_AMBER);
                 else arrow(c, xs[i], ys[i], fwd, REC_GREEN);
@@ -631,7 +630,8 @@ public class CaptureService extends Service {
                 cl.x = recMargin;
                 cl.y = recMargin + dp(4);
             } else {
-                cl.gravity = (recRev ? Gravity.BOTTOM : Gravity.TOP) | Gravity.CENTER_HORIZONTAL;
+                cl.gravity = (recRev ? Gravity.BOTTOM : Gravity.TOP) | Gravity.START;
+                cl.x = recMargin + dp(6);
                 cl.y = recMargin;
             }
             wm.addView(recChip, cl);

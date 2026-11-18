@@ -95,7 +95,6 @@ public class MainActivity extends Activity {
 
         section("Capture");
         addNumber("Delay before capture (seconds)", Prefs.DELAY, 0);
-        addSwitch("Horizontal scroll (sideways lists)", Prefs.HORIZONTAL, false);
         addNumber("Auto-record countdown before it starts (seconds, 3-20)", Prefs.TIMER_SEC, 5);
         addNumber("Max screens per long shot", Prefs.MAX_FRAMES, 20);
         root.addView(text("Scroll shot: the scroll area is set on screen with the \u25B2 \u25BC handles "
