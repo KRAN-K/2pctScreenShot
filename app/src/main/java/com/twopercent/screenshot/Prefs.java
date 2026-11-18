@@ -34,6 +34,7 @@ final class Prefs {
     static final String UPLOAD_AUTO = "upload_auto";
     static final String NOTIF_BAR = "notif_bar";     // controls in the top notification area (default on)
     static final String HORIZONTAL = "horizontal";   // scroll sideways
+    static final String REVERSE = "reverse";         // auto-record swipe direction: false = up/left, true = down/right
     static final String TIMER_SEC = "timer_sec";     // seconds between timed shots
     static final String FRAME_COLOR = "frame_color";
     static final String REGION_TOP = "region_top";

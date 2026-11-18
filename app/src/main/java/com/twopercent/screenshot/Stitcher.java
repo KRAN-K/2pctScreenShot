@@ -106,11 +106,12 @@ final class Stitcher {
         lastScore = bestAvg == Double.MAX_VALUE ? 99 : bestAvg;
 
         boolean ok = false;
-        if (bestD > 0 && bestAvg <= MAX_AVG_DIFF * 2) {
+        if (bestD > 0 && bestAvg <= MAX_AVG_DIFF * 2.5) {
             // verify: most of the overlapping area must really match (animated bits may differ).
             // Clean matches need 50%; a looser match (slight blur / moving bits) needs a better score.
             lastFrac = matchFraction(nl, prevL, cropTop, contentBottom - bestD, bestD);
-            ok = (bestAvg <= MAX_AVG_DIFF && lastFrac >= 0.4) || lastFrac >= 0.6;
+            ok = (bestAvg <= MAX_AVG_DIFF && lastFrac >= 0.4) || lastFrac >= 0.6
+                    || (bestAvg <= MAX_AVG_DIFF * 2.5 && lastFrac >= 0.3);   // small mismatches are fine
         }
 
         int d;

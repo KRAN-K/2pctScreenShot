@@ -70,7 +70,7 @@ public class CaptureService extends Service {
     private boolean timerRunning = false;
     private volatile boolean pauseOnly = false;
     private boolean panelHidden = false;
-    private TextView timerBtn, dirBtn;
+    private TextView timerBtn, dirBtn, revBtn;
     private VirtualDisplay display;
     private ImageReader reader;
     private int w, h, dpi;
@@ -279,9 +279,10 @@ public class CaptureService extends Service {
         TextView cap = pill("●  Capture section", true);
         timerBtn = pill("●  Auto-record", true);
         dirBtn = pill(dirLabel(), false);
+        revBtn = pill(revLabel(), false);
         TextView fin = pill("✓  Done / Finish", true);
         TextView cancel = pill("Cancel", false);
-        arrange(bodySection, cap, timerBtn, dirBtn, fin, cancel);
+        arrange(bodySection, cap, timerBtn, dirBtn, revBtn, fin, cancel);
         overlay.addView(bodySection);
 
         statusTv = new TextView(this);
@@ -299,6 +300,11 @@ public class CaptureService extends Service {
         cap.setOnClickListener(v -> captureSection(0));
         timerBtn.setOnClickListener(v -> toggleTimer());
         dirBtn.setOnClickListener(v -> toggleDirection());
+        revBtn.setOnClickListener(v -> {
+            if (timerRunning) return;
+            Prefs.putB(this, Prefs.REVERSE, !Prefs.b(this, Prefs.REVERSE, false));
+            revBtn.setText(revLabel());
+        });
         fin.setOnClickListener(v -> finishSection());
         cancel.setOnClickListener(v -> cancelSection());
         closeX.setOnClickListener(v -> {
@@ -350,6 +356,12 @@ public class CaptureService extends Service {
 
     private String dirLabel() {
         return horizontalMode() ? "Direction: ↔ sideways" : "Direction: ↕ up/down";
+    }
+
+    private String revLabel() {
+        boolean r = Prefs.b(this, Prefs.REVERSE, false);
+        if (horizontalMode()) return r ? "Auto swipe: \u25B6 right" : "Auto swipe: \u25C0 left";
+        return r ? "Auto swipe: \u25BC down" : "Auto swipe: \u25B2 up";
     }
 
     private boolean horizontalMode() { return Prefs.b(this, Prefs.HORIZONTAL, false); }
@@ -473,7 +485,8 @@ public class CaptureService extends Service {
     private static final int REC_GREEN = 0xFF22DD44, REC_RED = 0xFFFF2D2D, REC_AMBER = 0xFFFFB300;
     private View recBars;
     private TextView recChip;
-    private int recColor = REC_GREEN, recTop, recMargin;
+    private int recColor = REC_GREEN, recLine, recMargin;
+    private boolean recRev = false;
     private long recHoldUntil = 0;
 
     private final class RecBarsView extends View {
@@ -514,17 +527,17 @@ public class CaptureService extends Service {
         private void guide(Canvas c, int fw, int fh) {
             float[] xs, ys;
             if (horizontal) {
-                float x = (recTop - recMargin) / 2f;
+                float x = recRev ? (recLine + recMargin + fw) / 2f : (recLine - recMargin) / 2f;
                 xs = new float[]{x, x};
                 ys = new float[]{fh * 0.45f, fh * 0.70f};
             } else {
-                float y = (recTop - recMargin) / 2f;
+                float y = recRev ? (recLine + recMargin + fh) / 2f : (recLine - recMargin) / 2f;
                 float off = dp(65) + dp(34);
                 xs = new float[]{fw / 2f - off, fw / 2f + off};
                 ys = new float[]{y, y};
             }
             // content moves up (vertical) or left (sideways) while the user swipes the same way
-            float fwd = horizontal ? -90 : 0;
+            float fwd = horizontal ? (recRev ? 90 : -90) : (recRev ? 180 : 0);
             for (int i = 0; i < 2; i++) {
                 if (recColor == REC_RED) thumb(c, xs[i], ys[i]);
                 else if (recColor == REC_AMBER) arrow(c, xs[i], ys[i], fwd + 180, REC_AMBER);
@@ -539,22 +552,50 @@ public class CaptureService extends Service {
             if (horizontal) {
                 c.drawRect(0, 0, fw, bw, pt);
                 c.drawRect(0, fh - bw, fw, fh, pt);
-                c.drawRect(recTop - bw, 0, recTop, fh, pt);
+                if (recRev) c.drawRect(recLine, 0, recLine + bw, fh, pt);
+                else c.drawRect(recLine - bw, 0, recLine, fh, pt);
             } else {
                 c.drawRect(0, 0, bw, fh, pt);
                 c.drawRect(fw - bw, 0, fw, fh, pt);
-                c.drawRect(0, recTop - bw, fw, recTop, pt);
+                if (recRev) c.drawRect(0, recLine, fw, recLine + bw, pt);
+                else c.drawRect(0, recLine - bw, fw, recLine, pt);
             }
             guide(c, fw, fh);
         }
     }
 
+    private int recStitchTop, recStitchFooter;
+
+    /** Works out where the indicator strip sits and which rows of the stitched frame are usable. */
+    private void computeRecGeom() {
+        recMargin = dp(8);
+        recRev = Prefs.b(this, Prefs.REVERSE, false);
+        int ext = horizontal ? dp(130) : dp(44);
+        int len = horizontal ? w : h;
+        int need = recMargin + ext + recMargin;
+        if (recRev) {
+            recLine = Math.min(regionBottom, len - need);
+            recStitchTop = len - recLine;
+            recStitchFooter = regionTop;
+        } else {
+            recLine = Math.max(regionTop, need);
+            recStitchTop = recLine;
+            recStitchFooter = len - regionBottom;
+        }
+    }
+
+    /** Turns a screen frame into the "content moves up" form the stitcher expects, minus the indicator margins. */
+    private Bitmap toStitch(Bitmap f) {
+        if (horizontal) f = rotate(f, recRev ? -90 : 90);
+        else if (recRev) f = rotate(f, 180);
+        int m = recMargin;
+        return Bitmap.createBitmap(f, m, 0, f.getWidth() - 2 * m, f.getHeight());
+    }
+
     private void showRecordUi() {
         main.post(() -> {
             hideRecordUiNow();
-            recMargin = dp(8);
-            int ext = horizontal ? dp(130) : dp(44);
-            recTop = Math.max(regionTop, recMargin + ext + recMargin);
+            computeRecGeom();
             recColor = REC_GREEN;
             recBars = new RecBarsView(this);
             WindowManager.LayoutParams bl = new WindowManager.LayoutParams(w, h,
@@ -586,11 +627,11 @@ public class CaptureService extends Service {
                     PixelFormat.TRANSLUCENT);
             cl.layoutInDisplayCutoutMode = WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_ALWAYS;
             if (horizontal) {
-                cl.gravity = Gravity.TOP | Gravity.START;
+                cl.gravity = Gravity.TOP | (recRev ? Gravity.END : Gravity.START);
                 cl.x = recMargin;
                 cl.y = recMargin + dp(4);
             } else {
-                cl.gravity = Gravity.TOP | Gravity.CENTER_HORIZONTAL;
+                cl.gravity = (recRev ? Gravity.BOTTOM : Gravity.TOP) | Gravity.CENTER_HORIZONTAL;
                 cl.y = recMargin;
             }
             wm.addView(recChip, cl);
@@ -712,6 +753,7 @@ public class CaptureService extends Service {
         Prefs.putB(this, Prefs.HORIZONTAL, !horizontalMode());
         horizontal = horizontalMode();
         dirBtn.setText(dirLabel());
+        if (revBtn != null) revBtn.setText(revLabel());
         removeView(topHandle); topHandle = null;
         removeView(botHandle); botHandle = null;
         loadRegion();
@@ -737,6 +779,7 @@ public class CaptureService extends Service {
         setOverlayVisible(true);
         sectionMode = true;
         section = null;
+        recRev = false;
         sectionCount = 0;
         stopAuto = false;
         cancelled = false;
@@ -744,6 +787,7 @@ public class CaptureService extends Service {
         horizontal = horizontalMode();
         loadRegion();
         if (dirBtn != null) dirBtn.setText(dirLabel());
+        if (revBtn != null) revBtn.setText(revLabel());
         if (timerBtn != null) timerBtn.setText("●  Auto-record");
 
         frameView = new FrameView(this);
@@ -862,7 +906,8 @@ public class CaptureService extends Service {
 
     private Bitmap finishBitmap() {
         Bitmap out = section.finish();
-        return horizontal ? rotate(out, -90) : out;
+        if (horizontal) return rotate(out, recRev ? 90 : -90);
+        return recRev ? rotate(out, 180) : out;
     }
 
     private void captureSection(long extraDelayMs) {
@@ -926,13 +971,12 @@ public class CaptureService extends Service {
                     // the first frame is taken with every overlay hidden so the header is clean
                     Bitmap f0 = grabWait();
                     if (f0 == null) { sleep(500); f0 = grabWait(); }
+                    computeRecGeom();
                     showRecordUi();
                     sleep(250);
                     if (f0 != null) {
-                        if (horizontal) f0 = rotate(f0, 90);
-                        int m = recMargin;
-                        f0 = Bitmap.createBitmap(f0, m, 0, f0.getWidth() - 2 * m, f0.getHeight());
-                        section = new Stitcher(f0.getWidth(), f0.getHeight(), recTop, f0.getHeight() - regionBottom);
+                        f0 = toStitch(f0);
+                        section = new Stitcher(f0.getWidth(), f0.getHeight(), recStitchTop, recStitchFooter);
                         section.addFirst(f0);
                         sectionCount = 1;
                         recHoldUntil = SystemClock.uptimeMillis() + 650;
@@ -949,9 +993,7 @@ public class CaptureService extends Service {
                         Bitmap f = grabNew();
                         if (f == null) { sleep(40); continue; }
                         last = f;
-                        if (horizontal) f = rotate(f, 90);
-                        int m = recMargin;
-                        f = Bitmap.createBitmap(f, m, 0, f.getWidth() - 2 * m, f.getHeight());
+                        f = toStitch(f);
                         int r = section.addNext(f, -1);
                         if (r == Stitcher.OK) {
                             sectionCount++;
