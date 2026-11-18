@@ -467,6 +467,93 @@ public class CaptureService extends Service {
         return (0.299 * ((c >> 16) & 255) + 0.587 * ((c >> 8) & 255) + 0.114 * (c & 255)) / 255.0;
     }
 
+    // ---- auto-record indicator: coloured bars outside the captured area + a Finish chip
+
+    private static final int REC_GREEN = 0xFF22DD44, REC_RED = 0xFFFF2D2D, REC_AMBER = 0xFFFFB300;
+    private View recBars;
+    private TextView recChip;
+    private int recColor = REC_GREEN, recTop, recMargin;
+    private long recHoldUntil = 0;
+
+    private final class RecBarsView extends View {
+        private final Paint pt = new Paint();
+        RecBarsView(Context c) { super(c); }
+        @Override protected void onDraw(Canvas c) {
+            int fw = getWidth(), fh = getHeight(), bw = recMargin;
+            pt.setColor(recColor);
+            if (horizontal) {
+                c.drawRect(0, 0, fw, bw, pt);
+                c.drawRect(0, fh - bw, fw, fh, pt);
+                c.drawRect(recTop - bw, 0, recTop, fh, pt);
+            } else {
+                c.drawRect(0, 0, bw, fh, pt);
+                c.drawRect(fw - bw, 0, fw, fh, pt);
+                c.drawRect(0, recTop - bw, fw, recTop, pt);
+            }
+        }
+    }
+
+    private void showRecordUi() {
+        main.post(() -> {
+            hideRecordUiNow();
+            recMargin = dp(8);
+            int ext = horizontal ? dp(130) : dp(44);
+            recTop = Math.max(regionTop, recMargin + ext + recMargin);
+            recColor = REC_GREEN;
+            recBars = new RecBarsView(this);
+            WindowManager.LayoutParams bl = new WindowManager.LayoutParams(w, h,
+                    WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
+                    WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
+                            | WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE
+                            | WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
+                    PixelFormat.TRANSLUCENT);
+            bl.gravity = Gravity.TOP | Gravity.START;
+            bl.layoutInDisplayCutoutMode = WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_ALWAYS;
+            wm.addView(recBars, bl);
+
+            recChip = new TextView(this);
+            recChip.setText("\u25A0  Finish");
+            recChip.setTextSize(15);
+            recChip.setTypeface(null, android.graphics.Typeface.BOLD);
+            recChip.setTextColor(0xFFFFFFFF);
+            recChip.setGravity(Gravity.CENTER);
+            GradientDrawable g = new GradientDrawable();
+            g.setColor(0xEE000000);
+            g.setCornerRadius(dp(22));
+            g.setStroke(dp(2), 0xFFFFFFFF);
+            recChip.setBackground(g);
+            recChip.setOnClickListener(v -> finishSection());
+            WindowManager.LayoutParams cl = new WindowManager.LayoutParams(dp(130), dp(44),
+                    WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
+                    WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
+                            | WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
+                    PixelFormat.TRANSLUCENT);
+            cl.layoutInDisplayCutoutMode = WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_ALWAYS;
+            if (horizontal) {
+                cl.gravity = Gravity.TOP | Gravity.START;
+                cl.x = recMargin;
+                cl.y = recMargin + dp(4);
+            } else {
+                cl.gravity = Gravity.TOP | Gravity.CENTER_HORIZONTAL;
+                cl.y = recMargin;
+            }
+            wm.addView(recChip, cl);
+        });
+    }
+
+    private void hideRecordUiNow() {
+        if (recBars != null) { try { wm.removeView(recBars); } catch (Exception ignored) { } recBars = null; }
+        if (recChip != null) { try { wm.removeView(recChip); } catch (Exception ignored) { } recChip = null; }
+    }
+
+    private void hideRecordUi() { main.post(this::hideRecordUiNow); }
+
+    private void setRecColor(int c) {
+        if (c == recColor) return;
+        recColor = c;
+        main.post(() -> { if (recBars != null) recBars.invalidate(); });
+    }
+
     private final class HandleListener implements View.OnTouchListener {
         private final boolean top;
         private float startRaw;
@@ -582,6 +669,7 @@ public class CaptureService extends Service {
     }
 
     private void removeSectionViews() {
+        hideRecordUiNow();
         removeView(frameView); frameView = null;
         removeView(topHandle); topHandle = null;
         removeView(botHandle); botHandle = null;
@@ -774,32 +862,48 @@ public class CaptureService extends Service {
                 if (!stopAuto) {
                     // 2) record continuously: grab frames while the user scrolls slowly, stitch each
                     //    one onto the previous (small moves match reliably).
-                    setStatus("Recording... scroll slowly. Tap Finish in the notification bar when done");
-                    toastLong("Recording. Scroll slowly, then tap Finish in the notification bar.");
+                    toastLong("Recording. Scroll slowly. Green = ready, red = shot taken. Tap Finish when done.");
                     setOverlayVisible(false);
                     sleep(350);
                     Bitmap stale = grabNew();
                     if (stale != null) last = stale;
-                    long lastNew = SystemClock.uptimeMillis();
+                    // the first frame is taken with every overlay hidden so the header is clean
+                    Bitmap f0 = grabWait();
+                    if (f0 == null) { sleep(500); f0 = grabWait(); }
+                    showRecordUi();
+                    sleep(250);
+                    if (f0 != null) {
+                        if (horizontal) f0 = rotate(f0, 90);
+                        int m = recMargin;
+                        f0 = Bitmap.createBitmap(f0, m, 0, f0.getWidth() - 2 * m, f0.getHeight());
+                        section = new Stitcher(f0.getWidth(), f0.getHeight(), recTop, f0.getHeight() - regionBottom);
+                        section.addFirst(f0);
+                        sectionCount = 1;
+                        recHoldUntil = SystemClock.uptimeMillis() + 350;
+                        setRecColor(REC_RED);
+                    }
+                    if (section == null) {
+                        toast("Couldn't read the screen. Try again.");
+                        hideRecordUi();
+                        stopAuto = true;
+                    }
                     while (!stopAuto) {
+                        long now = SystemClock.uptimeMillis();
+                        if (recColor != REC_GREEN && now > recHoldUntil) setRecColor(REC_GREEN);
                         Bitmap f = grabNew();
-                        if (f == null) {
-                            if (SystemClock.uptimeMillis() - lastNew > 4000) { }
-                            sleep(40);
-                            continue;
-                        }
-                        lastNew = SystemClock.uptimeMillis();
+                        if (f == null) { sleep(40); continue; }
                         last = f;
                         if (horizontal) f = rotate(f, 90);
-                        if (section == null) {
-                            section = horizontal ? new Stitcher(h, w, regionTop, w - regionBottom)
-                                    : new Stitcher(w, h, regionTop, h - regionBottom);
-                            section.addFirst(f);
-                            sectionCount = 1;
-                            main.post(this::lockRegion);
-                        } else {
-                            int r = section.addNext(f, -1);
-                            if (r == Stitcher.OK) sectionCount++;
+                        int m = recMargin;
+                        f = Bitmap.createBitmap(f, m, 0, f.getWidth() - 2 * m, f.getHeight());
+                        int r = section.addNext(f, -1);
+                        if (r == Stitcher.OK) {
+                            sectionCount++;
+                            recHoldUntil = SystemClock.uptimeMillis() + 350;
+                            setRecColor(REC_RED);
+                        } else if (r == Stitcher.FAIL) {
+                            recHoldUntil = SystemClock.uptimeMillis() + 500;
+                            setRecColor(REC_AMBER);
                         }
                         if (section.totalHeight() > MAX_TOTAL_PX) {
                             toastLong("Reached the maximum image length. Saving.");
@@ -807,6 +911,7 @@ public class CaptureService extends Service {
                         }
                         sleep(60);
                     }
+                    hideRecordUi();
                 }
                 setOverlayVisible(true);
                 if (cancelled) {
