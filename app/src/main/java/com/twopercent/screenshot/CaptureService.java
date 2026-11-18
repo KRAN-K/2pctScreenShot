@@ -360,8 +360,8 @@ public class CaptureService extends Service {
 
     private String revLabel() {
         boolean r = Prefs.b(this, Prefs.REVERSE, false);
-        if (horizontalMode()) return r ? "Auto swipe: \u25B6 right" : "Auto swipe: \u25C0 left";
-        return r ? "Auto swipe: \u25BC down" : "Auto swipe: \u25B2 up";
+        if (horizontalMode()) return r ? "I scroll: \u25B6 right" : "I scroll: \u25C0 left";
+        return r ? "I scroll: \u25BC down" : "I scroll: \u25B2 up";
     }
 
     private boolean horizontalMode() { return false; }   // long shots always stitch up/down
@@ -547,7 +547,8 @@ public class CaptureService extends Service {
         @Override protected void onDraw(Canvas c) {
             int fw = getWidth(), fh = getHeight(), bw = recMargin;
             pt.setStyle(Paint.Style.FILL);
-            pt.setColor(recColor);
+            // thumbs up (good match) means this is the right area, so the outline stays green; amber still shows a failed match
+            pt.setColor(recColor == REC_RED ? REC_GREEN : recColor);
             if (horizontal) {
                 c.drawRect(0, 0, fw, bw, pt);
                 c.drawRect(0, fh - bw, fw, fh, pt);
@@ -963,7 +964,7 @@ public class CaptureService extends Service {
                 if (!stopAuto) {
                     // 2) record continuously: grab frames while the user scrolls slowly, stitch each
                     //    one onto the previous (small moves match reliably).
-                    toastLong("Recording. Scroll slowly. Green = ready, red = shot taken. Tap Finish when done.");
+                    toastLong("Recording. Scroll slowly. Green = ready, thumbs up = shot taken, amber = no match. Tap Finish when done.");
                     setOverlayVisible(false);
                     sleep(350);
                     Bitmap stale = grabNew();
