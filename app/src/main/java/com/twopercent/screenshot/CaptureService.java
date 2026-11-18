@@ -276,7 +276,7 @@ public class CaptureService extends Service {
         bodySection.setOrientation(LinearLayout.VERTICAL);
         bodySection.setVisibility(View.GONE);
         TextView cap = pill("●  Capture section", true);
-        timerBtn = pill("⏱  Timer shots", true);
+        timerBtn = pill("●  Auto-record", true);
         dirBtn = pill(dirLabel(), false);
         TextView fin = pill("✓  Done / Finish", true);
         TextView cancel = pill("Cancel", false);
@@ -600,7 +600,7 @@ public class CaptureService extends Service {
         horizontal = horizontalMode();
         loadRegion();
         if (dirBtn != null) dirBtn.setText(dirLabel());
-        if (timerBtn != null) timerBtn.setText("⏱  Timer shots");
+        if (timerBtn != null) timerBtn.setText("●  Auto-record");
 
         frameView = new FrameView(this);
         frameLp = new WindowManager.LayoutParams(w, h,
@@ -670,6 +670,7 @@ public class CaptureService extends Service {
     }
 
     private static final int FIRST = 10;
+    private static final int MAX_TOTAL_PX = 30000;
 
     private Bitmap rotate(Bitmap b, float deg) {
         Matrix m = new Matrix();
@@ -760,34 +761,51 @@ public class CaptureService extends Service {
         stopAuto = false;
         cancelled = false;
         pauseOnly = false;
-        main.post(() -> { if (timerBtn != null) timerBtn.setText("⏸  Stop timer"); });
+        main.post(() -> { if (timerBtn != null) timerBtn.setText("■  Stop recording"); });
         final int secs = Math.max(3, Math.min(20, Prefs.i(this, Prefs.TIMER_SEC, 5)));
         worker.execute(() -> {
             try {
-                while (!stopAuto) {
-                    for (int s = secs; s > 0 && !stopAuto; s--) {
-                        setStatus((section == null ? "Line up the first screen. " : "Scroll now. ")
-                                + "Shot in " + s + "   (tap Done when finished)");
-                        sleep(1000);
-                    }
-                    if (stopAuto) break;
-                    int r = captureOnce();
-                    if (r == FIRST || r == Stitcher.OK) {
-                        main.post(() -> {
-                            if (overlay != null) overlay.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS);
-                            if (frameView != null) {
-                                frameView.flash = true;
-                                frameView.invalidate();
-                                main.postDelayed(() -> {
-                                    if (frameView != null) { frameView.flash = false; frameView.invalidate(); }
-                                }, 500);
-                            }
-                        });
-                        setStatus("Section " + sectionCount + " saved");
-                    } else if (r == Stitcher.NO_CHANGE) {
-                        setStatus("Nothing moved, still waiting...");
-                    } else if (r == Stitcher.FAIL) {
-                        setStatus("Missed a match (" + section.lastScore() + "). Scroll back up a little so the last screen is partly visible; next shot in a moment.");
+                // 1) countdown so the user can line up the first screen
+                for (int s = secs; s > 0 && !stopAuto; s--) {
+                    setStatus((section == null ? "Line up the first screen. " : "Get ready. ")
+                            + "Recording starts in " + s);
+                    sleep(1000);
+                }
+                if (!stopAuto) {
+                    // 2) record continuously: grab frames while the user scrolls slowly, stitch each
+                    //    one onto the previous (small moves match reliably).
+                    setStatus("Recording... scroll slowly. Tap Finish in the notification bar when done");
+                    toastLong("Recording. Scroll slowly, then tap Finish in the notification bar.");
+                    setOverlayVisible(false);
+                    sleep(350);
+                    Bitmap stale = grabNew();
+                    if (stale != null) last = stale;
+                    long lastNew = SystemClock.uptimeMillis();
+                    while (!stopAuto) {
+                        Bitmap f = grabNew();
+                        if (f == null) {
+                            if (SystemClock.uptimeMillis() - lastNew > 4000) { }
+                            sleep(40);
+                            continue;
+                        }
+                        lastNew = SystemClock.uptimeMillis();
+                        last = f;
+                        if (horizontal) f = rotate(f, 90);
+                        if (section == null) {
+                            section = horizontal ? new Stitcher(h, w, regionTop, w - regionBottom)
+                                    : new Stitcher(w, h, regionTop, h - regionBottom);
+                            section.addFirst(f);
+                            sectionCount = 1;
+                            main.post(this::lockRegion);
+                        } else {
+                            int r = section.addNext(f, -1);
+                            if (r == Stitcher.OK) sectionCount++;
+                        }
+                        if (section.totalHeight() > MAX_TOTAL_PX) {
+                            toastLong("Reached the maximum image length. Saving.");
+                            break;
+                        }
+                        sleep(60);
                     }
                 }
                 setOverlayVisible(true);
@@ -808,8 +826,8 @@ public class CaptureService extends Service {
                 boolean keep = pauseOnly && !cancelled;
                 pauseOnly = false;
                 if (keep) {
-                    main.post(() -> { if (timerBtn != null) timerBtn.setText("⏱  Timer shots"); });
-                    setStatus("Timer stopped. Capture sections yourself or tap Done");
+                    main.post(() -> { if (timerBtn != null) timerBtn.setText("●  Auto-record"); });
+                    setStatus("Recording stopped. Capture sections yourself or tap Done");
                 } else {
                     main.post(this::exitSection);
                 }

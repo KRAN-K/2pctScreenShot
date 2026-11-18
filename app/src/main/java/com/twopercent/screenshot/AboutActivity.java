@@ -64,7 +64,7 @@ public class AboutActivity extends Activity {
                         + "(leave out fixed headers and footers), then tap Capture section.\n"
                         + "4. The border flashes when a section is saved. Scroll to the next part (keep a little overlap) "
                         + "and tap Capture section again. Tap Finish & save to stitch them.\n"
-                        + "   Timer shots: it counts down and takes each shot for you while you scroll. Tap Done when finished.\n"
+                        + "   Auto-record: after a short countdown it records while you scroll slowly and stitches as you go. Tap Finish in the notification bar when done.\n"
                         + "   Works in landscape too, and in sideways (horizontal) lists: use the Direction button.\n"
                         + "5. Tap the panel header to collapse it. Settings on the panel opens this app from inside MCOC.\n"
                         + "6. Screenshots are saved in Pictures, in the folder you pick in settings."));

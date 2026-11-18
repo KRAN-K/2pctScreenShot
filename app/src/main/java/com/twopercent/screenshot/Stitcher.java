@@ -46,6 +46,12 @@ final class Stitcher {
         return n == 0 || (double) sum / n < 2.0;
     }
 
+    int totalHeight() {
+        int t = 0;
+        for (Bitmap b : strips) t += b.getHeight();
+        return t;
+    }
+
     int strips() { return strips.size(); }
 
     void addFirst(Bitmap f) {
