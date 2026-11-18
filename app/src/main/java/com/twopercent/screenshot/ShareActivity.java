@@ -26,13 +26,19 @@ public class ShareActivity extends Activity {
         final Uri uri = getIntent().getData();
         if (uri == null) { finish(); return; }
 
-        final Intent send = new Intent(Intent.ACTION_SEND);
-        send.setType("image/*");
-        send.putExtra(Intent.EXTRA_STREAM, uri);
+        final boolean view = "view".equals(getIntent().getStringExtra("mode"));
+        final Intent send;
+        if (view) {
+            send = new Intent(Intent.ACTION_VIEW).setDataAndType(uri, "image/*");
+        } else {
+            send = new Intent(Intent.ACTION_SEND);
+            send.setType("image/*");
+            send.putExtra(Intent.EXTRA_STREAM, uri);
+        }
         send.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
 
-        int bg = 0xFF0D1117, card = 0xFF161B22, txt = 0xFFE6EDF3, sub = 0xFF8B949E;
-        getWindow().setBackgroundDrawable(new android.graphics.drawable.ColorDrawable(0xAA000000));
+        int bg = 0xFF05070A, card = 0xFF11161D, txt = 0xFFE6EDF3, sub = 0xFF8B949E;
+        getWindow().setBackgroundDrawable(new android.graphics.drawable.ColorDrawable(0xE6000000));
 
         LinearLayout root = new LinearLayout(this);
         root.setOrientation(LinearLayout.VERTICAL);
@@ -51,7 +57,7 @@ public class ShareActivity extends Activity {
         box.setClickable(true);
 
         TextView title = new TextView(this);
-        title.setText("Share screenshot with…");
+        title.setText(view ? "Open screenshot with…" : "Share screenshot with…");
         title.setTextColor(txt);
         title.setTextSize(18);
         title.setPadding(dp(4), 0, 0, dp(10));

@@ -14,6 +14,7 @@ import android.graphics.Bitmap;
 import android.graphics.Canvas;
 import android.graphics.Matrix;
 import android.graphics.Paint;
+import android.graphics.Path;
 import android.graphics.PixelFormat;
 import android.graphics.RectF;
 import android.graphics.drawable.GradientDrawable;
@@ -478,8 +479,62 @@ public class CaptureService extends Service {
     private final class RecBarsView extends View {
         private final Paint pt = new Paint();
         RecBarsView(Context c) { super(c); }
+        private void arrow(Canvas c, float cx, float cy, float deg, int color) {
+            float a = dp(22);
+            Path p = new Path();
+            p.moveTo(0, -a);
+            p.lineTo(a * 0.9f, 0);
+            p.lineTo(a * 0.38f, 0);
+            p.lineTo(a * 0.38f, a);
+            p.lineTo(-a * 0.38f, a);
+            p.lineTo(-a * 0.38f, 0);
+            p.lineTo(-a * 0.9f, 0);
+            p.close();
+            c.save();
+            c.translate(cx, cy);
+            c.rotate(deg);
+            pt.setStyle(Paint.Style.FILL_AND_STROKE);
+            pt.setStrokeWidth(dp(4));
+            pt.setColor(0xFF000000);
+            c.drawPath(p, pt);
+            pt.setStrokeWidth(0);
+            pt.setColor(color);
+            c.drawPath(p, pt);
+            c.restore();
+        }
+
+        private void thumb(Canvas c, float cx, float cy) {
+            Paint t = new Paint(Paint.ANTI_ALIAS_FLAG);
+            t.setTextSize(dp(40));
+            t.setTextAlign(Paint.Align.CENTER);
+            c.drawText("\uD83D\uDC4D", cx, cy + dp(14), t);
+        }
+
+        /** Guide icons in the strip outside the captured area: which way to scroll, and a thumbs up after a good match. */
+        private void guide(Canvas c, int fw, int fh) {
+            float[] xs, ys;
+            if (horizontal) {
+                float x = (recTop - recMargin) / 2f;
+                xs = new float[]{x, x};
+                ys = new float[]{fh * 0.45f, fh * 0.70f};
+            } else {
+                float y = (recTop - recMargin) / 2f;
+                float off = dp(65) + dp(34);
+                xs = new float[]{fw / 2f - off, fw / 2f + off};
+                ys = new float[]{y, y};
+            }
+            // content moves up (vertical) or left (sideways) while the user swipes the same way
+            float fwd = horizontal ? -90 : 0;
+            for (int i = 0; i < 2; i++) {
+                if (recColor == REC_RED) thumb(c, xs[i], ys[i]);
+                else if (recColor == REC_AMBER) arrow(c, xs[i], ys[i], fwd + 180, REC_AMBER);
+                else arrow(c, xs[i], ys[i], fwd, REC_GREEN);
+            }
+        }
+
         @Override protected void onDraw(Canvas c) {
             int fw = getWidth(), fh = getHeight(), bw = recMargin;
+            pt.setStyle(Paint.Style.FILL);
             pt.setColor(recColor);
             if (horizontal) {
                 c.drawRect(0, 0, fw, bw, pt);
@@ -490,6 +545,7 @@ public class CaptureService extends Service {
                 c.drawRect(fw - bw, 0, fw, fh, pt);
                 c.drawRect(0, recTop - bw, fw, recTop, pt);
             }
+            guide(c, fw, fh);
         }
     }
 
@@ -879,7 +935,7 @@ public class CaptureService extends Service {
                         section = new Stitcher(f0.getWidth(), f0.getHeight(), recTop, f0.getHeight() - regionBottom);
                         section.addFirst(f0);
                         sectionCount = 1;
-                        recHoldUntil = SystemClock.uptimeMillis() + 350;
+                        recHoldUntil = SystemClock.uptimeMillis() + 650;
                         setRecColor(REC_RED);
                     }
                     if (section == null) {
@@ -899,7 +955,7 @@ public class CaptureService extends Service {
                         int r = section.addNext(f, -1);
                         if (r == Stitcher.OK) {
                             sectionCount++;
-                            recHoldUntil = SystemClock.uptimeMillis() + 350;
+                            recHoldUntil = SystemClock.uptimeMillis() + 650;
                             setRecColor(REC_RED);
                         } else if (r == Stitcher.FAIL) {
                             recHoldUntil = SystemClock.uptimeMillis() + 500;
@@ -1042,6 +1098,12 @@ public class CaptureService extends Service {
 
     // -------------------------------------------------------------- LINE / notifications
 
+    private void openAny(Uri u) {
+        Intent i = new Intent(this, ShareActivity.class).setData(u).putExtra("mode", "view")
+                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_GRANT_READ_URI_PERMISSION);
+        try { startActivity(i); } catch (Exception ignored) { }
+    }
+
     private void shareAny(Uri u) {
         Intent i = new Intent(this, ShareActivity.class).setData(u)
                 .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_GRANT_READ_URI_PERMISSION);
@@ -1109,7 +1171,7 @@ public class CaptureService extends Service {
     }
 
     private void postResult(Uri u) {
-        Intent view = new Intent(Intent.ACTION_VIEW).setDataAndType(u, "image/*")
+        Intent view = new Intent(this, ShareActivity.class).setData(u).putExtra("mode", "view")
                 .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_ACTIVITY_NEW_TASK);
         PendingIntent open = PendingIntent.getActivity(this, 3, view,
                 PendingIntent.FLAG_IMMUTABLE | PendingIntent.FLAG_UPDATE_CURRENT);
@@ -1205,9 +1267,7 @@ public class CaptureService extends Service {
 
         open.setOnClickListener(v -> {
             dismissPreview();
-            Intent view = new Intent(Intent.ACTION_VIEW).setDataAndType(uri, "image/*")
-                    .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_ACTIVITY_NEW_TASK);
-            try { startActivity(view); } catch (Exception ignored) { }
+            openAny(uri);
         });
         folder.setOnClickListener(v -> { dismissPreview(); ImageSaver.openFolder(this); });
         line.setOnClickListener(v -> { dismissPreview(); shareToLine(uri); });
