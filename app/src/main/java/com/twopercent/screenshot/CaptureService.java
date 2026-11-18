@@ -1285,6 +1285,7 @@ public class CaptureService extends Service {
         TextView open = pill("Open", true);
         TextView folder = pill("Open folder", true);
         TextView line = pill("LINE", true);
+        TextView delete = pill("Delete", false);
         TextView close = pill("Close", false);
         TextView shareBtn = pill("Share…", true);
         LinearLayout row1 = new LinearLayout(this);
@@ -1293,6 +1294,7 @@ public class CaptureService extends Service {
         row2.setOrientation(LinearLayout.HORIZONTAL);
         row1.addView(open, btnLp());
         row1.addView(folder, btnLp());
+        row1.addView(delete, btnLp());
         row2.addView(line, btnLp());
         row2.addView(shareBtn, btnLp());
         row2.addView(close, btnLp());
@@ -1315,6 +1317,20 @@ public class CaptureService extends Service {
         folder.setOnClickListener(v -> { dismissPreview(); ImageSaver.openFolder(this); });
         line.setOnClickListener(v -> { dismissPreview(); shareToLine(uri); });
         shareBtn.setOnClickListener(v -> { dismissPreview(); shareAny(uri); });
+        // two taps to delete: the first asks, the second removes the saved shot
+        delete.setOnClickListener(v -> {
+            if (!"Delete".contentEquals(delete.getText())) {
+                boolean ok = ImageSaver.delete(this, uri);
+                dismissPreview();
+                toast(ok ? "Deleted" : "Couldn't delete. Remove it in Files or Gallery.");
+            } else {
+                delete.setText("Confirm");
+                delete.setTextColor(0xFFFF4D4D);
+                main.postDelayed(() -> {
+                    if (previewView == box) { delete.setText("Delete"); delete.setTextColor(AppTheme.text(this)); }
+                }, 4000);
+            }
+        });
         close.setOnClickListener(v -> dismissPreview());
         x.setOnClickListener(v -> dismissPreview());
         off.setOnClickListener(v -> {

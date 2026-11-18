@@ -19,7 +19,7 @@ Made by **KRANK** - 2% Projects.
 - No third-party libraries
 
 ## Install
-Download `releases/2pctScreenShot-v1.1.9.apk` and open it on your phone (allow installs from that source).
+Download `releases/2pctScreenShot-v1.1.10.apk` and open it on your phone (allow installs from that source).
 It is debug-signed, which is fine for sideloading.
 
 ## Use

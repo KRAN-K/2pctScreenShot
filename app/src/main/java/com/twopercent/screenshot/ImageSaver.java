@@ -48,6 +48,15 @@ final class ImageSaver {
         return u;
     }
 
+    /** Deletes a shot this app saved (the app owns it, so no extra permission is needed). */
+    static boolean delete(Context c, Uri u) {
+        try {
+            return c.getContentResolver().delete(u, null, null) > 0;
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
     static String clean(String s, String def) {
         if (s == null) return def;
         s = s.replaceAll("[\\\\:*?\"<>|]", "_").replaceAll("^/+|/+$", "").trim();
