@@ -70,7 +70,7 @@ public class CaptureService extends Service {
     private boolean timerRunning = false;
     private volatile boolean pauseOnly = false;
     private boolean panelHidden = false;
-    private TextView timerBtn, dirBtn, revBtn;
+    private TextView timerBtn, dirBtn, revBtn, undoBtn, capBtn;
     private VirtualDisplay display;
     private ImageReader reader;
     private int w, h, dpi;
@@ -267,9 +267,10 @@ public class CaptureService extends Service {
         bodyMain.setOrientation(LinearLayout.VERTICAL);
         TextView shot = pill("📷  Screenshot", true);
         TextView scroll = pill("⇕  Scroll shot", true);
+        TextView manual = pill("\uD83E\uDDE9  Manual stitch", true);
         TextView settings = pill("⚙  Settings", false);
         TextView quit = pill("Quit", false);
-        arrange(bodyMain, shot, scroll, settings, quit);
+        arrange(bodyMain, shot, scroll, manual, settings, quit);
         overlay.addView(bodyMain);
 
         // scroll-shot buttons
@@ -277,12 +278,15 @@ public class CaptureService extends Service {
         bodySection.setOrientation(LinearLayout.VERTICAL);
         bodySection.setVisibility(View.GONE);
         TextView cap = pill("●  Capture section", true);
+        capBtn = cap;
         timerBtn = pill("●  Auto-record", true);
+        undoBtn = pill("\u21B6  Undo last shot", false);
+        undoBtn.setVisibility(View.GONE);
         dirBtn = pill(dirLabel(), false);
         revBtn = pill(revLabel(), false);
         TextView fin = pill("✓  Done / Finish", true);
         TextView cancel = pill("Cancel", false);
-        arrange(bodySection, cap, timerBtn, revBtn, fin, cancel);
+        arrange(bodySection, cap, timerBtn, undoBtn, revBtn, fin, cancel);
         overlay.addView(bodySection);
 
         statusTv = new TextView(this);
@@ -295,6 +299,8 @@ public class CaptureService extends Service {
 
         shot.setOnClickListener(v -> singleShot(0));
         scroll.setOnClickListener(v -> enterSection());
+        manual.setOnClickListener(v -> enterSection(true));
+        undoBtn.setOnClickListener(v -> undoManual());
         settings.setOnClickListener(v -> openMainApp());
         quit.setOnClickListener(v -> stopSelf());
         cap.setOnClickListener(v -> captureSection(0));
@@ -774,7 +780,9 @@ public class CaptureService extends Service {
         removeView(botHandle); botHandle = null;
     }
 
-    private void enterSection() {
+    private void enterSection() { enterSection(false); }
+
+    private void enterSection(boolean manual) {
         if (busy || sectionMode) return;
         ensureOverlay();
         setOverlayVisible(true);
@@ -784,6 +792,11 @@ public class CaptureService extends Service {
         sectionCount = 0;
         stopAuto = false;
         cancelled = false;
+        clearManual();
+        manualStitch = manual;
+        if (timerBtn != null) timerBtn.setVisibility(manual ? View.GONE : View.VISIBLE);
+        if (undoBtn != null) undoBtn.setVisibility(manual ? View.VISIBLE : View.GONE);
+        updateManualUi();
 
         horizontal = horizontalMode();
         loadRegion();
@@ -813,12 +826,18 @@ public class CaptureService extends Service {
         if (collapsed) toggleCollapsed();
         statusTv.setText(horizontal
                 ? "Drag the ◀ ▶ handles to fit the scroll area, then tap Capture section"
-                : "Drag the ▲ ▼ handles to fit the scroll area, then tap Capture section");
+                : (manual ? "Drag the ▲ ▼ handles to fit the scroll area. Then tap Capture, scroll, tap Capture again. Tap Done and I'll stitch them."
+                          : "Drag the ▲ ▼ handles to fit the scroll area, then tap Capture section"));
         updateRunNotification(1);
     }
 
     private void exitSection() {
         sectionMode = false;
+        manualStitch = false;
+        clearManual();
+        if (timerBtn != null) timerBtn.setVisibility(View.VISIBLE);
+        if (undoBtn != null) undoBtn.setVisibility(View.GONE);
+        updateManualUi();
         section = null;
         sectionCount = 0;
         removeSectionViews();
@@ -843,7 +862,7 @@ public class CaptureService extends Service {
     }
 
     private void sectionReady(String what) {
-        String msg = what + ". Scroll to the next part (keep a little overlap), then tap Capture section.";
+        String msg = what + ". Scroll to the next part (keep a little overlap), then tap Capture.";
         setStatus(msg);
         toastLong(msg);
         main.post(() -> {
@@ -868,7 +887,8 @@ public class CaptureService extends Service {
     }
 
     /** Captures one section (worker thread). Returns FIRST, Stitcher.OK/NO_CHANGE/FAIL, or -1 if no frame. */
-    private int captureOnce() {
+    /** Hides the panel, waits for the screen to stop moving and returns that frame (worker thread), or null. */
+    private Bitmap grabSettled() {
         setOverlayVisible(false);
         sleep(220);
         Bitmap stale = grabNew();               // drop any frame that still shows our panel
@@ -876,7 +896,7 @@ public class CaptureService extends Service {
         sleep(140);
         Bitmap f = grabWait();
         if (f == null) { sleep(500); f = grabWait(); }
-        if (f == null) { setOverlayVisible(true); return -1; }
+        if (f == null) { setOverlayVisible(true); return null; }
         // wait until the screen has stopped moving (scroll momentum / animations) before using the frame
         long settleEnd = SystemClock.uptimeMillis() + 2500;
         while (SystemClock.uptimeMillis() < settleEnd) {
@@ -888,6 +908,12 @@ public class CaptureService extends Service {
             f = g;
             if (still) break;
         }
+        return f;
+    }
+
+    private int captureOnce() {
+        Bitmap f = grabSettled();
+        if (f == null) return -1;
         if (horizontal) f = rotate(f, 90);      // sideways scrolling becomes up/down scrolling
         int r;
         if (section == null) {
@@ -913,6 +939,7 @@ public class CaptureService extends Service {
 
     private void captureSection(long extraDelayMs) {
         if (!sectionMode || busy) return;
+        if (manualStitch) { captureManual(extraDelayMs); return; }
         busy = true;
         worker.execute(() -> {
             try {
@@ -938,6 +965,186 @@ public class CaptureService extends Service {
         });
     }
 
+    // -------------------------------------------------------------- manual stitch
+    // The user taps Capture whenever they like; frames are kept on disk and stitched together at Done,
+    // matching each one as well as it can (loose match, or the whole screen if nothing lines up).
+
+    private boolean manualStitch = false;
+    private final java.util.ArrayList<java.io.File> manualFiles = new java.util.ArrayList<>();
+    private Bitmap manualPrev;
+
+    private java.io.File manualDir() {
+        java.io.File d = new java.io.File(getCacheDir(), "manual");
+        d.mkdirs();
+        return d;
+    }
+
+    private void clearManual() {
+        manualFiles.clear();
+        manualPrev = null;
+        java.io.File[] old = manualDir().listFiles();
+        if (old != null) for (java.io.File f : old) f.delete();
+    }
+
+    private void updateManualUi() {
+        main.post(() -> {
+            if (capBtn != null) capBtn.setText(manualStitch
+                    ? "●  Capture shot (" + manualFiles.size() + ")" : "●  Capture section");
+        });
+    }
+
+    private void captureManual(long extraDelayMs) {
+        if (busy) return;
+        busy = true;
+        worker.execute(() -> {
+            try {
+                setStatus("Capturing...");
+                sleep(extraDelayMs);
+                Bitmap f = grabSettled();
+                if (f == null) { setStatus("Screen not ready yet. Wait a second and tap Capture again."); return; }
+                if (manualPrev != null && Stitcher.same(manualPrev, f)) {
+                    String m = "Nothing moved. Scroll first, then tap Capture.";
+                    setStatus(m);
+                    toastLong(m);
+                    return;
+                }
+                java.io.File file = new java.io.File(manualDir(), "shot_" + System.currentTimeMillis() + ".png");
+                try (java.io.FileOutputStream os = new java.io.FileOutputStream(file)) {
+                    f.compress(Bitmap.CompressFormat.PNG, 100, os);
+                } catch (java.io.IOException e) {
+                    toastLong("Couldn't keep that shot. Is the phone out of space?");
+                    return;
+                }
+                manualFiles.add(file);
+                manualPrev = f;
+                if (manualFiles.size() == 1) lockRegion();
+                updateManualUi();
+                sectionReady("Shot " + manualFiles.size() + " captured");
+            } finally {
+                busy = false;
+                setOverlayVisible(true);
+            }
+        });
+    }
+
+    private void undoManual() {
+        if (!manualStitch || busy || manualFiles.isEmpty()) return;
+        manualFiles.remove(manualFiles.size() - 1).delete();
+        manualPrev = null;
+        if (manualFiles.isEmpty()) {            // nothing left: let the user adjust the area again
+            addHandles();
+            wm.removeView(overlay);
+            wm.addView(overlay, lp);
+        }
+        updateManualUi();
+        setStatus("Removed the last shot. " + manualFiles.size() + " kept.");
+    }
+
+    private void finishManual() {
+        if (busy) return;
+        if (manualFiles.isEmpty()) { toast("Nothing captured yet"); return; }
+        busy = true;
+        worker.execute(() -> {
+            try {
+                setOverlayVisible(false);
+                boolean rev = Prefs.b(this, Prefs.REVERSE, false);
+                java.util.ArrayList<java.io.File> files = new java.util.ArrayList<>(manualFiles);
+                Stitcher st = null;
+                int loose = 0, gaps = 0, i = 0;
+                for (java.io.File file : files) {
+                    Bitmap f = android.graphics.BitmapFactory.decodeFile(file.getPath());
+                    if (f == null) continue;
+                    if (rev) { Bitmap r = rotate(f, 180); f.recycle(); f = r; }
+                    i++;
+                    setStatus("Stitching " + i + " of " + files.size() + "...");
+                    if (st == null) {
+                        int top = rev ? f.getHeight() - regionBottom : regionTop;
+                        int bottom = rev ? regionTop : f.getHeight() - regionBottom;
+                        st = new Stitcher(f.getWidth(), f.getHeight(), top, bottom);
+                        st.addFirst(f);
+                    } else {
+                        int r = st.addNextBest(f);
+                        if (r == Stitcher.LOOSE) loose++;
+                        else if (r == Stitcher.GAP) gaps++;
+                        if (st.totalHeight() > MAX_TOTAL_PX) {
+                            toastLong("Reached the maximum image length. Saving what fits.");
+                            break;
+                        }
+                    }
+                }
+                if (st == null) { toast("Couldn't read the shots. Try again."); return; }
+                Bitmap out = st.finish();
+                if (rev) out = rotate(out, 180);
+                setOverlayVisible(true);
+                finishAndSave(out);
+                if (loose + gaps > 0) {
+                    toastLong("Stitched " + i + " shots. " + (loose + gaps) + " join(s) were a best guess"
+                            + (gaps > 0 ? ", " + gaps + " had no overlap (scrolled too far). " : ". ")
+                            + "Scroll less between shots for a cleaner result.");
+                }
+            } catch (OutOfMemoryError oom) {
+                toast("Out of memory. Take fewer shots.");
+            } finally {
+                busy = false;
+                main.post(this::exitSection);
+                setOverlayVisible(true);
+            }
+        });
+    }
+
+    // -------------------------------------------------------------- countdown that blinks so nobody misses it
+
+    private TextView cdView;
+    private boolean cdOn;
+    private final Runnable cdBlink = new Runnable() {
+        @Override public void run() {
+            if (cdView == null) return;
+            cdOn = !cdOn;
+            int bg = cdOn ? 0xFFFFB300 : 0xFFFF2D2D;
+            GradientDrawable g = new GradientDrawable();
+            g.setColor(bg);
+            g.setCornerRadius(dp(24));
+            g.setStroke(dp(4), 0xFFFFFFFF);
+            cdView.setBackground(g);
+            cdView.setTextColor(cdOn ? 0xFF000000 : 0xFFFFFFFF);
+            if (frameView != null) { frameView.flash = cdOn; frameView.invalidate(); }
+            main.postDelayed(this, 300);
+        }
+    };
+
+    private void showCountdown(int secs) {
+        main.post(() -> {
+            if (cdView == null) {
+                cdView = new TextView(this);
+                cdView.setGravity(Gravity.CENTER);
+                cdView.setTypeface(null, android.graphics.Typeface.BOLD);
+                cdView.setTextSize(34);
+                cdView.setPadding(dp(28), dp(18), dp(28), dp(18));
+                WindowManager.LayoutParams p = new WindowManager.LayoutParams(
+                        WindowManager.LayoutParams.WRAP_CONTENT, WindowManager.LayoutParams.WRAP_CONTENT,
+                        WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
+                        WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE | WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE,
+                        PixelFormat.TRANSLUCENT);
+                p.gravity = Gravity.CENTER;
+                wm.addView(cdView, p);
+                main.post(cdBlink);
+            }
+            cdView.setText("WAIT\nStarting in " + secs);
+            cdView.performHapticFeedback(HapticFeedbackConstants.LONG_PRESS);
+        });
+    }
+
+    private void hideCountdown() {
+        main.post(() -> {
+            if (cdView != null) {
+                main.removeCallbacks(cdBlink);
+                try { wm.removeView(cdView); } catch (Exception ignored) { }
+                cdView = null;
+            }
+            if (frameView != null) { frameView.flash = false; frameView.invalidate(); }
+        });
+    }
+
     private void toggleTimer() {
         if (!sectionMode) return;
         if (timerRunning) {                 // second tap = stop the timer, keep the sections
@@ -959,8 +1166,10 @@ public class CaptureService extends Service {
                 for (int s = secs; s > 0 && !stopAuto; s--) {
                     setStatus((section == null ? "Line up the first screen. " : "Get ready. ")
                             + "Recording starts in " + s);
+                    showCountdown(s);
                     sleep(1000);
                 }
+                hideCountdown();
                 if (!stopAuto) {
                     // 2) record continuously: grab frames while the user scrolls slowly, stitch each
                     //    one onto the previous (small moves match reliably).
@@ -1025,6 +1234,7 @@ public class CaptureService extends Service {
             } catch (OutOfMemoryError oom) {
                 toast("Out of memory. Lower max screens in settings.");
             } finally {
+                hideCountdown();
                 busy = false;
                 timerRunning = false;
                 boolean keep = pauseOnly && !cancelled;
@@ -1043,6 +1253,7 @@ public class CaptureService extends Service {
     private void finishSection() {
         if (!sectionMode) return;
         if (busy) { pauseOnly = false; stopAuto = true; return; }   // timer / auto loop finishes and saves
+        if (manualStitch) { finishManual(); return; }
         if (section == null) { toast("Nothing captured yet"); return; }
         busy = true;
         worker.execute(() -> {

@@ -14,6 +14,8 @@ import java.util.List;
  */
 final class Stitcher {
     static final int OK = 0, NO_CHANGE = 1, FAIL = 2;
+    /** addNextBest results: joined on a loose match / nothing lined up so the whole screen was appended. */
+    static final int LOOSE = 3, GAP = 4;
 
     private static final int STEP = 4;      // horizontal sampling step
     private static final int BAND_H = 48;   // rows in the matching band
@@ -143,6 +145,41 @@ final class Stitcher {
         prev = f;
         prevL = nl;
         return OK;
+    }
+
+    /**
+     * Like addNext but never gives up: when the strict match fails it takes the shift with the lowest
+     * overlap difference, and if even that looks wrong it appends the whole new screen so no content is lost.
+     */
+    int addNextBest(Bitmap f) {
+        int r = addNext(f, -1);
+        if (r != FAIL) return r;
+        byte[][] nl = luma(f);
+        int maxD = contentBottom - cropTop - BAND_H;
+        int bestD = -1;
+        double bestAvg = Double.MAX_VALUE;
+        for (int d = MIN_D; d <= maxD; d += 3) {
+            double[] st = overlap(nl, prevL, cropTop, contentBottom - d, d);
+            if (st[0] < bestAvg) { bestAvg = st[0]; bestD = d; }
+        }
+        if (bestD > 0) {
+            int c = bestD;
+            for (int d = c - 2; d <= c + 2; d++) {
+                if (d < 1 || d > maxD) continue;
+                double[] st = overlap(nl, prevL, cropTop, contentBottom - d, d);
+                if (st[0] < bestAvg) { bestAvg = st[0]; bestD = d; }
+            }
+        }
+        if (bestD >= MIN_D && bestAvg <= 40.0) {
+            strips.add(Bitmap.createBitmap(f, 0, contentBottom - bestD, w, bestD));
+            prev = f;
+            prevL = nl;
+            return LOOSE;
+        }
+        strips.add(Bitmap.createBitmap(f, 0, cropTop, w, contentBottom - cropTop));
+        prev = f;
+        prevL = nl;
+        return GAP;
     }
 
     /** {average luma difference, fraction of pixels within tolerance} of new[y] vs prev[y + d], y in [from, to). */
