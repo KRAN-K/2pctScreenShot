@@ -1,6 +1,6 @@
-# 2pctScreeShot
+# 2pctScreenShot
 
-**2%ScreenShot** (repo: https://github.com/KRAN-K/2pctScreeShot)
+**2%ScreenShot** (a.k.a. 2pctScreenShot)
 
 Screenshot and long scrolling-screenshot tool for **Marvel Contest of Champions** (Android 10+).
 Made by **KRANK** - 2% Projects.
